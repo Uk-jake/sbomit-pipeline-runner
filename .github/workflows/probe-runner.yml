@@ -1,0 +1,57 @@
+# Probe the GitHub-hosted runner environment.
+# Purpose: decide the default trace-backend (ebpf needs kernel 6.12+ for bpf_task_from_pid).
+name: Probe runner
+
+on:
+  workflow_dispatch:          # run manually from the Actions tab
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04, ubuntu-22.04]   # compare available images
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Collect environment facts
+        run: |
+          set -u
+          # Kernel version decides ebpf vs ptrace
+          kernel="$(uname -r)"
+          # BTF is needed by most CO-RE eBPF programs
+          if [ -f /sys/kernel/btf/vmlinux ]; then btf="yes"; else btf="no"; fi
+          # Check whether the bpf_task_from_pid kfunc is exported in BTF (needs bpftool; best effort)
+          kfunc="unknown"
+          if command -v bpftool >/dev/null 2>&1 && [ "$btf" = "yes" ]; then
+            if sudo bpftool btf dump file /sys/kernel/btf/vmlinux 2>/dev/null | grep -q "bpf_task_from_pid"; then
+              kfunc="yes"
+            else
+              kfunc="no"
+            fi
+          fi
+          # Distro, arch, passwordless sudo
+          distro="$(. /etc/os-release && echo "$PRETTY_NAME")"
+          arch="$(uname -m)"
+          if sudo -n true 2>/dev/null; then sudo_ok="yes"; else sudo_ok="no"; fi
+          # Preinstalled Go (relevant if sbomit is installed via go install)
+          go_ver="$(go version 2>/dev/null || echo 'not installed')"
+
+          # Write a table to the job summary
+          {
+            echo "### ${{ matrix.os }}"
+            echo "| Item | Value |"
+            echo "|---|---|"
+            echo "| Kernel | \`$kernel\` |"
+            echo "| BTF (/sys/kernel/btf/vmlinux) | $btf |"
+            echo "| bpf_task_from_pid in BTF | $kfunc |"
+            echo "| Distro | $distro |"
+            echo "| Arch | $arch |"
+            echo "| Passwordless sudo | $sudo_ok |"
+            echo "| Go | $go_ver |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Also print to the log
+          cat "$GITHUB_STEP_SUMMARY"

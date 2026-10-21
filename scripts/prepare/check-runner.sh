@@ -1,13 +1,56 @@
 #!/usr/bin/env bash
 # Stage 1-1: check runner
 #
-# Verify the runner can execute the pipeline: Linux, x86_64, passwordless sudo.
-# Fails fast with a clear message on unsupported runners.
-#
-# Status: skeleton. Not implemented yet.
+# Verify the runner can execute the pipeline: Linux, x86_64, passwordless sudo,
+# and the base commands used by later stages. Records runner facts.
+# eBPF support is not checked here: witness fails on its own when the eBPF
+# tracer cannot be loaded (see Stage 2-3).
 set -euo pipefail
 
 # shellcheck source=scripts/lib/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
-not_implemented "Stage 1-1: check runner"
+ensure_work_dirs
+
+os="$(uname -s)"
+arch="$(uname -m)"
+kernel="$(uname -r)"
+distro="unknown"
+if [ -r /etc/os-release ]; then
+  distro="$(. /etc/os-release && echo "${PRETTY_NAME:-unknown}")"
+fi
+
+problems=()
+
+[ "$os" = "Linux" ] || problems+=("Unsupported OS '${os}'. SBOMit requires a Linux runner.")
+[ "$arch" = "x86_64" ] || problems+=("Unsupported architecture '${arch}'. Only x86_64 is supported for now.")
+
+# eBPF tracing and witness need root. Hosted runners allow sudo without a password.
+if ! sudo -n true 2>/dev/null; then
+  problems+=("Passwordless sudo is not available. witness needs root for eBPF tracing.")
+fi
+
+# Base commands used by later stages.
+for cmd in git curl tar sha256sum make openssl jq base64 timeout; do
+  command -v "$cmd" >/dev/null 2>&1 || problems+=("Required command not found: ${cmd}")
+done
+
+if [ "${#problems[@]}" -gt 0 ]; then
+  for p in "${problems[@]}"; do log_error "$p"; done
+  die "Runner check failed."
+fi
+
+record_fact RUNNER_OS "$os"
+record_fact RUNNER_ARCH "$arch"
+record_fact RUNNER_KERNEL "$kernel"
+record_fact RUNNER_DISTRO "$distro"
+record_fact RUNNER_IMAGE_OS "${ImageOS:-unknown}"            # set on GitHub-hosted runners
+record_fact RUNNER_IMAGE_VERSION "${ImageVersion:-unknown}"  # set on GitHub-hosted runners
+# eBPF-related facts for diagnosis only (not used to decide anything).
+record_fact RUNNER_BTF "$([ -f /sys/kernel/btf/vmlinux ] && echo yes || echo no)"
+
+log_info "OS/arch : ${os}/${arch}"
+log_info "Kernel  : ${kernel}"
+log_info "Distro  : ${distro}"
+log_info "Image   : ${ImageOS:-unknown} ${ImageVersion:-unknown}"
+log_info "BTF     : $([ -f /sys/kernel/btf/vmlinux ] && echo yes || echo no)"

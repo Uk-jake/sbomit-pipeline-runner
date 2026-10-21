@@ -154,6 +154,49 @@ ensure_work_dirs() {
   chmod 700 "$SBOMIT_KEY_DIR"   # key dir must not be readable by others
 }
 
+# ---------------------------------------------------------------------------
+# Run facts (consumed by Stage 4 metadata)
+# ---------------------------------------------------------------------------
+
+# record_fact <KEY> <value>
+# Appends KEY=value to $SBOMIT_WORK_DIR/facts.env. Later entries win.
+# Values are single-line; newlines are replaced with spaces.
+record_fact() {
+  local key="$1" value="${2//$'\n'/ }"
+  mkdir -p "$SBOMIT_WORK_DIR"
+  printf '%s=%s\n' "$key" "$value" >>"${SBOMIT_WORK_DIR}/facts.env"
+}
+
+# ---------------------------------------------------------------------------
+# Isolated Go toolchain for building tools
+# ---------------------------------------------------------------------------
+#
+# witness and sbomit are built with a dedicated Go installed under
+# $SBOMIT_TOOLS_DIR. It is never added to $GITHUB_PATH, and its module/build
+# caches are separate from the user's default (~/go, ~/.cache/go-build).
+# Reason: if tool builds warmed the user's Go caches, the traced user build
+# would not be a cold-cache build and witness would observe different activity.
+
+SBOMIT_TOOLS_DIR="${SBOMIT_WORK_DIR}/tools"
+export SBOMIT_TOOLS_DIR
+
+# use_tools_go
+# Exports Go env for the CURRENT script process only (each step is a new shell,
+# so nothing leaks into later steps or the user's build).
+use_tools_go() {
+  local goroot="${SBOMIT_TOOLS_DIR}/go"
+  [ -x "${goroot}/bin/go" ] || die "Tools Go is not installed at ${goroot}. Run scripts/install/go.sh first."
+  export GOROOT="$goroot"
+  export PATH="${goroot}/bin:${PATH}"
+  export GOPATH="${SBOMIT_TOOLS_DIR}/gopath"
+  export GOMODCACHE="${GOPATH}/pkg/mod"
+  export GOCACHE="${SBOMIT_TOOLS_DIR}/gocache"
+  export GOBIN="${SBOMIT_TOOLS_DIR}/bin"
+  export GOTOOLCHAIN=local      # never auto-download another toolchain
+  export GOFLAGS=-modcacherw    # keep the module cache deletable
+  mkdir -p "$GOPATH" "$GOCACHE" "$GOBIN"
+}
+
 # Placeholder used by skeleton scripts that are not implemented yet.
 not_implemented() {
   log_notice "$1: not implemented yet (skeleton). Skipping."

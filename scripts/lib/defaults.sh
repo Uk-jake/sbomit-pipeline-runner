@@ -18,14 +18,10 @@ DEFAULT_TRACE_BACKEND="ebpf"
 # shellcheck disable=SC2034
 DEFAULT_TIMEOUT_MINUTES="30"
 
-# witness attestors to enable. Placeholder until the witness stage is implemented.
+# witness attestors to enable (witness default). 'material' and 'product' are always recorded.
 # shellcheck disable=SC2034
 DEFAULT_ATTESTORS="environment,git"
 
-# Pinned tool versions. Finalized in the install stage (witness binary source TBD).
-# shellcheck disable=SC2034
-DEFAULT_WITNESS_VERSION=""
-# shellcheck disable=SC2034
-DEFAULT_SBOMIT_VERSION=""
-# shellcheck disable=SC2034
-DEFAULT_SYFT_VERSION=""
+# Tool install settings (versions, sources) are NOT here. Each tool keeps its
+# settings at the top of its own script in scripts/install/, so changing how a
+# tool is installed means editing exactly one file.

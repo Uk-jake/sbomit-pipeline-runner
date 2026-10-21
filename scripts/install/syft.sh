@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Stage 1-2: install syft
 #
-# Install a pinned syft release, verified against the official checksums file.
-# Version: ${SBOMIT_SYFT_VERSION:-$DEFAULT_SYFT_VERSION}.
-#
-# Status: skeleton. Not implemented yet.
+# To change how syft is installed, edit only the "Install" block.
 set -euo pipefail
-
 # shellcheck source=scripts/lib/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
-not_implemented "Stage 1-2: install syft"
+# ── Install ──────────────────────────────────────────────────────────────────
+group_start "Install syft"
+curl -sSfL https://get.anchore.io/syft | sudo sh -s -- -b /usr/local/bin
+group_end
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Record the version the installer picked.
+record_fact SYFT_VERSION "$(syft version | awk '/^Version:/ {print $2}')"

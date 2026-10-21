@@ -4,7 +4,8 @@ A GitHub Action that runs your build under [witness](https://github.com/in-toto/
 eBPF tracing and generates an SBOM from the resulting attestation with
 [sbomit](https://github.com/sbomit/sbomit).
 
-> **Status: skeleton.** Input validation (Stage 0) works. Stages 1 to 4 are
+> **Status: in progress.** Stage 0 (validation) and Stage 1 (runner check, tool
+> install, toolchain setup) are implemented. Stages 2 to 4 are
 > placeholders and do not produce an attestation or SBOM yet.
 
 ## Usage
@@ -44,15 +45,32 @@ jobs:
 ## Requirements
 
 - Linux x86_64 runner with passwordless `sudo`
-- A kernel where witness eBPF tracing works. The action checks this and fails if
-  eBPF tracing is not available. There is no ptrace fallback.
+- A runner where witness eBPF tracing works. If the eBPF tracer cannot be loaded,
+  witness fails before your build starts. There is no ptrace fallback.
+  Supported runners are the ones that pass this repository's E2E workflow.
+- Network access to github.com, dl.google.com and get.anchore.io (tools are installed at run time).
+
+## Tools
+
+Each tool is installed by one script in `scripts/install/`. The install
+commands are at the top of each script, so changing how a tool is installed
+means editing that one file.
+
+| Tool | Script | How |
+|---|---|---|
+| witness | `witness.sh` | Built from `in-toto/witness` + `in-toto/go-witness` (`main` by default) with `go work` |
+| sbomit | `sbomit.sh` | `go install github.com/sbomit/sbomit@latest` |
+| syft | `syft.sh` | Official installer script from `get.anchore.io` |
+| Go (tools only) | `go.sh` | Official archive, sha256-verified; isolated from the user's PATH and caches |
+
+The exact versions and commits used in a run are recorded for the run metadata.
 
 ## Pipeline
 
 | Stage | Step | Script |
 |---|---|---|
 | 0 Validate | inputs, workspace | `scripts/validate/` |
-| 1 Prepare | runner check, tool install, eBPF check, toolchain setup | `scripts/prepare/`, `scripts/install/` |
+| 1 Prepare | runner check, tool install, toolchain setup | `scripts/prepare/`, `scripts/install/` |
 | 2 Run witness | signing key, network CA, traced build | `scripts/witness/` |
 | 3 Run sbomit | generate, check | `scripts/sbomit/` |
 | 4 Report | metadata, summary, upload | `scripts/report/` |

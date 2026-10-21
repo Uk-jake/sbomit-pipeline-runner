@@ -89,7 +89,7 @@ runs:
     # a warm dependency cache changes what witness observes (cold-cache policy).
     - name: "[1-4] Set up Go"
       if: inputs.language == 'go'
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v7
       with:
         go-version-file: ${{ hashFiles('go.mod') != '' && 'go.mod' || '' }}
         go-version: ${{ hashFiles('go.mod') == '' && 'stable' || '' }}
@@ -101,14 +101,16 @@ runs:
 
     - name: "[1-4] Set up Node"
       if: inputs.language == 'node'
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version-file: ${{ hashFiles('.nvmrc') != '' && '.nvmrc' || '' }}
         node-version: ${{ hashFiles('.nvmrc') == '' && 'lts/*' || '' }}
+        # setup-node v5+ auto-enables caching when package.json has "packageManager".
+        package-manager-cache: false
 
     - name: "[1-4] Set up Python"
       if: inputs.language == 'python'
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version-file: ${{ hashFiles('.python-version') != '' && '.python-version' || '' }}
         python-version: ${{ hashFiles('.python-version') == '' && '3.x' || '' }}
@@ -171,7 +173,7 @@ runs:
     # Name includes job id, matrix index and format to avoid name collisions within one workflow run.
     - name: "[4-3] Upload results"
       if: always() && steps.validate_inputs.outcome == 'success' && steps.validate_workspace.outcome == 'success'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: sbomit-${{ github.job }}-${{ strategy.job-index }}-${{ inputs.sbom-format }}
         path: ${{ runner.temp }}/sbomit/out/

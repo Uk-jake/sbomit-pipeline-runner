@@ -12,7 +12,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
 ws="$SBOMIT_WORKSPACE"
-checkout_hint="Add 'uses: actions/checkout@v4' as the step right before this action."
+checkout_hint="Add 'uses: actions/checkout@v7' as the step right before this action."
 
 if [ ! -d "$ws" ]; then
   die "Workspace directory does not exist: ${ws}. ${checkout_hint}"

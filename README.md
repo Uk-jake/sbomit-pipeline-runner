@@ -14,7 +14,7 @@ jobs:
   sbom:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4          # required, and must come right before this action
+      - uses: actions/checkout@v7          # required, and must come right before this action
         with:
           persist-credentials: false
       - uses: Uk-jake/sbomit-pipeline-runner@main

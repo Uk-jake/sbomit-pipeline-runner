@@ -19,7 +19,7 @@ jobs:
         os: [ubuntu-22.04, ubuntu-24.04, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Run SBOMit action
@@ -80,7 +80,7 @@ jobs:
             use_syft: "true"
     name: invalid-inputs (${{ matrix.case }})
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Run SBOMit action (expected to fail)

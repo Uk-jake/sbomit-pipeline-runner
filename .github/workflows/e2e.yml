@@ -1,0 +1,104 @@
+# End-to-end tests that run this action from the repository itself (uses: ./).
+# Current scope (skeleton): Stage 0 validation and step wiring.
+name: E2E
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Valid inputs must pass through every stage (stages 1-4 are stubs for now).
+  valid-inputs:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run SBOMit action
+        id: sbomit
+        uses: ./
+        with:
+          build-command: |
+            cd tests/fixtures/go-hello
+            go build -trimpath ./...
+          language: go
+      - name: Show action outputs
+        env:
+          ATTESTATION_PATH: ${{ steps.sbomit.outputs.attestation-path }}
+          SBOM_PATH: ${{ steps.sbomit.outputs.sbom-path }}
+          METADATA_PATH: ${{ steps.sbomit.outputs.metadata-path }}
+        run: |
+          echo "attestation-path: ${ATTESTATION_PATH:-<empty>}"
+          echo "sbom-path       : ${SBOM_PATH:-<empty>}"
+          echo "metadata-path   : ${METADATA_PATH:-<empty>}"
+
+  # Invalid inputs must be rejected by Stage 0. The action step is allowed to fail,
+  # and the next step asserts that it actually failed.
+  invalid-inputs:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case: empty-build-command
+            build_command: "   "
+            language: none
+            network_trace: "false"
+            sbom_format: spdx23
+            use_syft: "true"
+          - case: unknown-language
+            build_command: "true"
+            language: java
+            network_trace: "false"
+            sbom_format: spdx23
+            use_syft: "true"
+          - case: unknown-sbom-format
+            build_command: "true"
+            language: none
+            network_trace: "false"
+            sbom_format: spdx22
+            use_syft: "true"
+          - case: non-bool-network-trace
+            build_command: "true"
+            language: none
+            network_trace: "yes"
+            sbom_format: spdx23
+            use_syft: "true"
+          - case: cdx15-with-syft
+            build_command: "true"
+            language: none
+            network_trace: "false"
+            sbom_format: cdx15
+            use_syft: "true"
+    name: invalid-inputs (${{ matrix.case }})
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run SBOMit action (expected to fail)
+        id: sbomit
+        continue-on-error: true
+        uses: ./
+        with:
+          build-command: ${{ matrix.build_command }}
+          language: ${{ matrix.language }}
+          network-trace: ${{ matrix.network_trace }}
+          sbom-format: ${{ matrix.sbom_format }}
+          use-syft: ${{ matrix.use_syft }}
+      - name: Assert the action failed
+        env:
+          OUTCOME: ${{ steps.sbomit.outcome }}
+        run: |
+          echo "outcome: ${OUTCOME}"
+          if [ "$OUTCOME" != "failure" ]; then
+            echo "::error::Expected Stage 0 to reject case '${{ matrix.case }}', but the action outcome was '${OUTCOME}'."
+            exit 1
+          fi

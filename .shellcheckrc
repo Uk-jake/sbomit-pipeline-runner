@@ -1,0 +1,3 @@
+# Resolve `source` directives relative to the repository root (where shellcheck is run).
+source-path=SCRIPTDIR/../..
+external-sources=true

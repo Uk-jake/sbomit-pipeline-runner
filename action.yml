@@ -1,0 +1,178 @@
+name: SBOMit Pipeline Runner
+description: Run your build under witness eBPF tracing and generate an SBOMit SBOM from the attestation.
+author: Uk-jake
+
+# Design notes
+# - This file only wires inputs to scripts. All logic lives in scripts/.
+# - Scripts are called through $GITHUB_ACTION_PATH (the action's own checkout),
+#   never through relative `uses: ./...` paths, which would resolve against the
+#   caller's workspace.
+# - Inputs are passed to scripts as SBOMIT_* env vars on the steps that need them.
+#   They are never interpolated into `run:` bodies (prevents script injection).
+# - The caller must run actions/checkout before this action.
+
+inputs:
+  build-command:
+    description: "Required. Command that builds your project. witness traces it. Multi-line allowed."
+    required: true
+  language:
+    description: "Project toolchain to set up before the build: none | go | rust | node | python. 'none' means you set it up yourself."
+    required: false
+    default: "none"
+  network-trace:
+    description: "Also trace network activity during the build: true | false."
+    required: false
+    default: "false"
+  sbom-format:
+    description: "SBOM output format: spdx23 | cdx14 | cdx15. One format per run."
+    required: false
+    default: "spdx23"
+  use-syft:
+    description: "Enrich the SBOM with a syft catalog of the source tree: true | false."
+    required: false
+    default: "true"
+
+outputs:
+  attestation-path:
+    description: "Path to the signed witness attestation."
+    value: ${{ steps.witness_run.outputs.attestation-path }}
+  sbom-path:
+    description: "Path to the generated SBOM."
+    value: ${{ steps.sbomit_generate.outputs.sbom-path }}
+  metadata-path:
+    description: "Path to run-metadata.json (environment, tool versions, inputs)."
+    value: ${{ steps.report_metadata.outputs.metadata-path }}
+
+runs:
+  using: composite
+  steps:
+    # ── Stage 0. Validate ──────────────────────────────────────────────────
+    - name: "[0-1] Validate inputs"
+      id: validate_inputs
+      shell: bash
+      env:
+        SBOMIT_BUILD_COMMAND: ${{ inputs.build-command }}
+        SBOMIT_LANGUAGE: ${{ inputs.language }}
+        SBOMIT_NETWORK_TRACE: ${{ inputs.network-trace }}
+        SBOMIT_SBOM_FORMAT: ${{ inputs.sbom-format }}
+        SBOMIT_USE_SYFT: ${{ inputs.use-syft }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/validate/inputs.sh"
+
+    - name: "[0-2] Validate workspace"
+      id: validate_workspace
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/validate/workspace.sh"
+
+    # ── Stage 1. Prepare ───────────────────────────────────────────────────
+    - name: "[1-1] Check runner"
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/prepare/check-runner.sh"
+
+    - name: "[1-2] Install witness"
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/install/witness.sh"
+
+    - name: "[1-2] Install sbomit"
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/install/sbomit.sh"
+
+    - name: "[1-2] Install syft"
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/install/syft.sh"
+
+    - name: "[1-3] Check eBPF"
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/prepare/check-ebpf.sh"
+
+    # [1-4] Project toolchain. Runs after tool installation so the user's
+    # toolchain ends up first on PATH. Caching is disabled on purpose:
+    # a warm dependency cache changes what witness observes (cold-cache policy).
+    - name: "[1-4] Set up Go"
+      if: inputs.language == 'go'
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ hashFiles('go.mod') != '' && 'go.mod' || '' }}
+        go-version: ${{ hashFiles('go.mod') == '' && 'stable' || '' }}
+        cache: false
+
+    - name: "[1-4] Set up Rust"
+      if: inputs.language == 'rust'
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: "[1-4] Set up Node"
+      if: inputs.language == 'node'
+      uses: actions/setup-node@v4
+      with:
+        node-version-file: ${{ hashFiles('.nvmrc') != '' && '.nvmrc' || '' }}
+        node-version: ${{ hashFiles('.nvmrc') == '' && 'lts/*' || '' }}
+
+    - name: "[1-4] Set up Python"
+      if: inputs.language == 'python'
+      uses: actions/setup-python@v5
+      with:
+        python-version-file: ${{ hashFiles('.python-version') != '' && '.python-version' || '' }}
+        python-version: ${{ hashFiles('.python-version') == '' && '3.x' || '' }}
+
+    # ── Stage 2. Run witness ───────────────────────────────────────────────
+    - name: "[2-1] Generate signing key"
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/witness/gen-signing-key.sh"
+
+    - name: "[2-2] Set up network-trace CA"
+      if: inputs.network-trace == 'true'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/scripts/witness/setup-network-ca.sh"
+
+    - name: "[2-3] Run witness"
+      id: witness_run
+      shell: bash
+      env:
+        SBOMIT_BUILD_COMMAND: ${{ inputs.build-command }}
+        SBOMIT_NETWORK_TRACE: ${{ inputs.network-trace }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/witness/run.sh"
+
+    # ── Stage 3. Run sbomit ────────────────────────────────────────────────
+    - name: "[3-1] Generate SBOM"
+      id: sbomit_generate
+      shell: bash
+      env:
+        SBOMIT_SBOM_FORMAT: ${{ inputs.sbom-format }}
+        SBOMIT_USE_SYFT: ${{ inputs.use-syft }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/sbomit/generate.sh"
+
+    - name: "[3-2] Check SBOM"
+      shell: bash
+      env:
+        SBOMIT_SBOM_FORMAT: ${{ inputs.sbom-format }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/sbomit/check-sbom.sh"
+
+    # ── Stage 4. Report ────────────────────────────────────────────────────
+    # Runs even when Stage 1-3 fail (for diagnosis), but not when input or
+    # workspace validation failed (nothing meaningful to report then).
+    - name: "[4-1] Write run metadata"
+      id: report_metadata
+      if: always() && steps.validate_inputs.outcome == 'success' && steps.validate_workspace.outcome == 'success'
+      shell: bash
+      env:
+        SBOMIT_LANGUAGE: ${{ inputs.language }}
+        SBOMIT_NETWORK_TRACE: ${{ inputs.network-trace }}
+        SBOMIT_SBOM_FORMAT: ${{ inputs.sbom-format }}
+        SBOMIT_USE_SYFT: ${{ inputs.use-syft }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/report/metadata.sh"
+
+    - name: "[4-2] Write job summary"
+      if: always() && steps.validate_inputs.outcome == 'success' && steps.validate_workspace.outcome == 'success'
+      shell: bash
+      env:
+        SBOMIT_SBOM_FORMAT: ${{ inputs.sbom-format }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/report/summary.sh"
+
+    # Uploads only $RUNNER_TEMP/sbomit/out. Private keys live in .../keys and are never uploaded.
+    # Name includes job id, matrix index and format to avoid name collisions within one workflow run.
+    - name: "[4-3] Upload results"
+      if: always() && steps.validate_inputs.outcome == 'success' && steps.validate_workspace.outcome == 'success'
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbomit-${{ github.job }}-${{ strategy.job-index }}-${{ inputs.sbom-format }}
+        path: ${{ runner.temp }}/sbomit/out/
+        if-no-files-found: warn

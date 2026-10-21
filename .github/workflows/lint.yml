@@ -1,0 +1,47 @@
+# Static checks for this repository: shell scripts and workflow files.
+name: Lint
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # shellcheck is preinstalled on GitHub-hosted Ubuntu runners.
+      - name: Run shellcheck on all scripts
+        run: |
+          shellcheck --version | sed -n 2p
+          find scripts -name '*.sh' -print0 | xargs -0 shellcheck
+
+  actionlint:
+    runs-on: ubuntu-24.04
+    env:
+      ACTIONLINT_VERSION: "1.7.7"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Download a pinned release and verify it against the published checksums (no curl | bash).
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "${base}/${tarball}"
+          curl -fsSLO "${base}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          grep " ${tarball}\$" "actionlint_${ACTIONLINT_VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "$tarball" actionlint
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      # actionlint checks workflow files only (not action.yml metadata).
+      - name: Run actionlint
+        run: actionlint -color

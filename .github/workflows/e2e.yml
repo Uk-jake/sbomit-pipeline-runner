@@ -72,6 +72,13 @@ jobs:
             network_trace: "yes"
             sbom_format: spdx23
             use_syft: "true"
+          # Temporary: network trace is not implemented yet. Remove when it is.
+          - case: network-trace-not-supported-yet
+            build_command: "true"
+            language: none
+            network_trace: "true"
+            sbom_format: spdx23
+            use_syft: "true"
           - case: cdx15-with-syft
             build_command: "true"
             language: none

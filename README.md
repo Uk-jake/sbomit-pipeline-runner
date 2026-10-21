@@ -4,9 +4,10 @@ A GitHub Action that runs your build under [witness](https://github.com/in-toto/
 eBPF tracing and generates an SBOM from the resulting attestation with
 [sbomit](https://github.com/sbomit/sbomit).
 
-> **Status: in progress.** Stage 0 (validation) and Stage 1 (runner check, tool
-> install, toolchain setup) are implemented. Stages 2 to 4 are
-> placeholders and do not produce an attestation or SBOM yet.
+> **Status: in progress.** Stages 0 to 2 are implemented: the build runs under
+> witness eBPF file tracing and a signed attestation is produced. Network trace
+> (`network-trace: true`) is not supported yet. SBOM generation (Stage 3) and
+> reporting (Stage 4) are placeholders.
 
 ## Usage
 
@@ -30,7 +31,7 @@ jobs:
 |---|---|---|
 | `build-command` | (required) | Command that builds your project. Multi-line allowed. |
 | `language` | `none` | `none`, `go`, `rust`, `node`, `python` |
-| `network-trace` | `false` | `true`, `false` |
+| `network-trace` | `false` | `false` only for now (`true` is rejected until network trace is implemented) |
 | `sbom-format` | `spdx23` | `spdx23`, `cdx14`, `cdx15` |
 | `use-syft` | `true` | `true`, `false` (`cdx15` requires `false`) |
 

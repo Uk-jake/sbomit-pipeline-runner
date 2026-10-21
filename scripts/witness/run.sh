@@ -1,15 +1,103 @@
 #!/usr/bin/env bash
 # Stage 2-3: run witness
 #
-# Run: witness run --trace --trace-backend ebpf -- bash -c "$SBOMIT_BUILD_COMMAND"
-# Under: sudo -E env HOME=$HOME PATH=$PATH, wrapped with coreutils timeout.
-# Output: attestation in $SBOMIT_OUT_DIR, ownership returned to the runner user.
-# Step output: attestation-path
+# Run the user's build under witness with eBPF file tracing and write a signed
+# attestation to $SBOMIT_OUT_DIR/attestation.json.
 #
-# Status: skeleton. Not implemented yet.
+# To change HOW witness is invoked, edit only the "Run" block.
+#
+# After the run this script verifies that eBPF tracing was really used:
+#   - on failure : explain likely causes (eBPF unavailable, timeout, build error)
+#   - on success : require "Using tracer: ebpf" in the log and >= 1 traced process
+# (There is no separate eBPF check step. witness fails before the build starts
+#  when the eBPF tracer cannot be loaded; it never falls back to ptrace.)
+#
+# Env:
+#   SBOMIT_BUILD_COMMAND   the user's build command (never interpolated into code)
+# Step output:
+#   attestation-path
 set -euo pipefail
-
 # shellcheck source=scripts/lib/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
-not_implemented "Stage 2-3: run witness"
+require_cmd witness jq base64 timeout
+[ -n "${SBOMIT_BUILD_COMMAND:-}" ] || die "SBOMIT_BUILD_COMMAND is empty."
+[ -f "$SBOMIT_KEY_DIR/signing.key" ] || die "Signing key not found. Stage 2-1 must run first."
+
+BACKEND="${SBOMIT_TRACE_BACKEND:-$DEFAULT_TRACE_BACKEND}"
+ATTESTORS="${SBOMIT_ATTESTORS:-$DEFAULT_ATTESTORS}"
+TIMEOUT_MINUTES="${SBOMIT_TIMEOUT_MINUTES:-$DEFAULT_TIMEOUT_MINUTES}"
+ATTESTATION="$SBOMIT_OUT_DIR/attestation.json"
+LOG="$SBOMIT_WORK_DIR/witness-run.log"
+
+cd "$SBOMIT_WORKSPACE"
+mkdir -p "$SBOMIT_OUT_DIR"
+
+# ── Run ──────────────────────────────────────────────────────────────────────
+# Root is required for eBPF. HOME and PATH are kept so the build sees the same
+# toolchains and caches as the runner user (sudo would otherwise reset them).
+# Output goes to the Actions log and to $LOG (for the checks below).
+group_start "witness run (backend: ${BACKEND}, timeout: ${TIMEOUT_MINUTES}m)"
+set +e
+sudo -E env "HOME=$HOME" "PATH=$PATH" \
+  timeout --kill-after=30s "${TIMEOUT_MINUTES}m" \
+  witness run \
+    --step build \
+    --trace \
+    --attestor-command-run-trace-backend "$BACKEND" \
+    --attestations "$ATTESTORS" \
+    --signer-file-key-path "$SBOMIT_KEY_DIR/signing.key" \
+    --outfile "$ATTESTATION" \
+    -- bash -c "$SBOMIT_BUILD_COMMAND" 2>&1 | tee "$LOG"
+rc="${PIPESTATUS[0]}"
+set -e
+group_end
+# ─────────────────────────────────────────────────────────────────────────────
+
+# witness ran as root; hand results back to the runner user.
+sudo chown "$(id -u):$(id -g)" "$ATTESTATION" "$LOG" 2>/dev/null || true
+record_fact WITNESS_EXIT_CODE "$rc"
+
+# ---- Failure: explain the most likely cause --------------------------------
+if [ "$rc" -ne 0 ]; then
+  if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+    die "witness run timed out after ${TIMEOUT_MINUTES} minutes."
+  fi
+  # The eBPF tracer is loaded BEFORE the build starts. If witness logged that the
+  # tracer is in use, eBPF worked and the failure came from the build itself.
+  if ! grep -q "Using tracer: ebpf" "$LOG" && grep -qiE 'ebpf|bpf|cgroup' "$LOG"; then
+    # TODO: refine this message once the supported runner image is confirmed by E2E.
+    die "witness could not use eBPF tracing on this runner (kernel $(uname -r)). SBOMit requires eBPF; ptrace is not supported. See the witness log above."
+  fi
+  die "witness run failed (exit code ${rc}). This is usually the build command itself failing; see the log above."
+fi
+
+# ---- Success: verify eBPF tracing was really used --------------------------
+grep -q "Using tracer: ebpf" "$LOG" \
+  || die "witness finished but did not report 'Using tracer: ebpf'. The attestation was not produced with eBPF tracing."
+
+[ -s "$ATTESTATION" ] || die "witness finished but ${ATTESTATION} is missing or empty."
+
+# Decode the DSSE envelope once and summarize what was captured.
+statement="$SBOMIT_WORK_DIR/attestation.statement.json"
+jq -r '.payload' "$ATTESTATION" | base64 -d >"$statement" || die "Could not decode the attestation payload."
+count() { jq "$1" "$statement"; }
+processes="$(count '[.predicate.attestations[] | select(.type | test("/command-run/")) | .attestation.processes // [] | length] | add // 0')"
+opened_files="$(count '[.predicate.attestations[] | select(.type | test("/command-run/")) | .attestation.processes // [] | .[] | .openedfiles // {} | length] | add // 0')"
+materials="$(count '[.predicate.attestations[] | select(.type | test("/material/")) | .attestation // {} | length] | add // 0')"
+products="$(count '[.predicate.attestations[] | select(.type | test("/product/")) | .attestation // {} | length] | add // 0')"
+
+[ "$processes" -gt 0 ] || die "The attestation contains no traced processes. eBPF tracing did not capture the build."
+
+record_fact TRACED_PROCESSES "$processes"
+record_fact TRACED_OPENED_FILES "$opened_files"
+record_fact ATTESTATION_MATERIALS "$materials"
+record_fact ATTESTATION_PRODUCTS "$products"
+
+log_info "Attestation    : ${ATTESTATION}"
+log_info "Processes      : ${processes}"
+log_info "Opened files   : ${opened_files}"
+log_info "Materials      : ${materials}"
+log_info "Products       : ${products}  (known witness limitation: often empty when tracing is on)"
+
+set_output attestation-path "$ATTESTATION"

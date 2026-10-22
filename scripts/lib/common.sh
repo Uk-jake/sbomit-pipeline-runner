@@ -197,6 +197,20 @@ use_tools_go() {
   mkdir -p "$GOPATH" "$GOCACHE" "$GOBIN"
 }
 
+# ---------------------------------------------------------------------------
+# Result file locations (shared by Stage 2-4)
+# ---------------------------------------------------------------------------
+
+# sbom_path <format>
+# spdx23/spdx22 -> $SBOMIT_OUT_DIR/sbom.spdx.json, cdx14/cdx15 -> $SBOMIT_OUT_DIR/sbom.cdx.json
+sbom_path() {
+  case "$1" in
+    spdx*) printf '%s\n' "$SBOMIT_OUT_DIR/sbom.spdx.json" ;;
+    cdx*)  printf '%s\n' "$SBOMIT_OUT_DIR/sbom.cdx.json" ;;
+    *)     die "Unknown SBOM format: $1" ;;
+  esac
+}
+
 # Placeholder used by skeleton scripts that are not implemented yet.
 not_implemented() {
   log_notice "$1: not implemented yet (skeleton). Skipping."

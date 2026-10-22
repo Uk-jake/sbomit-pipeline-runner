@@ -67,8 +67,10 @@ group_end
 # anything root-owned before this action is left as it was. Runs on success
 # and failure alike.
 owner="$(id -u):$(id -g)"
-sudo find "$SBOMIT_WORKSPACE" "$HOME" "$SBOMIT_WORK_DIR" -xdev -user root -cnewer "$MARKER" \
-  -exec chown -h "$owner" {} + 2>/dev/null || true
+restored="$(sudo find "$SBOMIT_WORKSPACE" "$HOME" "$SBOMIT_WORK_DIR" -xdev -user root -cnewer "$MARKER" \
+  -print -exec chown -h "$owner" {} + 2>/dev/null | sort -u | wc -l)" || restored="?"
+log_info "Returned ${restored} root-owned file(s) created by the build to the runner user."
+record_fact OWNERSHIP_RESTORED_FILES "$restored"
 record_fact WITNESS_EXIT_CODE "$rc"
 
 # Keep the witness log with the uploaded results (success or failure) for diagnosis.

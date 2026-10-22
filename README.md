@@ -4,10 +4,10 @@ A GitHub Action that runs your build under [witness](https://github.com/in-toto/
 eBPF tracing and generates an SBOM from the resulting signed attestation with
 [sbomit](https://github.com/sbomit/sbomit).
 
-> **Status: in progress.** Stages 0 to 2 are implemented: your build runs under
-> witness eBPF file tracing and a signed attestation is produced. Network trace
-> (`network-trace: true`) is not supported yet. SBOM generation (Stage 3) and
-> reporting (Stage 4) are placeholders.
+> **Status: in progress.** Stages 0 to 3 are implemented: your build runs under
+> witness eBPF file tracing, a signed attestation is produced, and an SBOM is
+> generated from it. Network trace (`network-trace: true`) is not supported yet.
+> Reporting and upload of all results (Stage 4) are still placeholders.
 
 ## How it fits into your workflow
 
@@ -62,6 +62,9 @@ needs for building witness and sbomit is kept separate from your PATH and caches
 | `attestation-path` | Signed witness attestation |
 | `sbom-path` | Generated SBOM |
 | `metadata-path` | Run metadata (environment, tool versions, inputs) |
+
+The SBOM document is named after your repository, and its version is the short
+commit SHA of the checked-out source, so each SBOM identifies the build it describes.
 
 ## Accurate SBOMs: turn off dependency caches
 

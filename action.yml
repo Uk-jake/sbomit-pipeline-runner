@@ -125,6 +125,7 @@ runs:
     # ── Stage 4. Report ────────────────────────────────────────────────────
     # Runs even when Stage 1-3 fail (for diagnosis), but not when input or
     # workspace validation failed (nothing meaningful to report then).
+    # Order: metadata -> upload -> summary (the summary links to the uploaded artifact).
     - name: "[4-1] Write run metadata"
       id: report_metadata
       if: always() && steps.validate_inputs.outcome == 'success' && steps.validate_workspace.outcome == 'success'
@@ -135,19 +136,22 @@ runs:
         SBOMIT_USE_SYFT: ${{ inputs.use-syft }}
       run: bash "$GITHUB_ACTION_PATH/scripts/report/metadata.sh"
 
-    - name: "[4-2] Write job summary"
-      if: always() && steps.validate_inputs.outcome == 'success' && steps.validate_workspace.outcome == 'success'
-      shell: bash
-      env:
-        SBOMIT_SBOM_FORMAT: ${{ inputs.sbom-format }}
-      run: bash "$GITHUB_ACTION_PATH/scripts/report/summary.sh"
-
     # Uploads only $RUNNER_TEMP/sbomit/out. Private keys live in .../keys and are never uploaded.
     # Name includes job id, matrix index and format to avoid name collisions within one workflow run.
-    - name: "[4-3] Upload results"
+    # Keep the name expression in sync with SBOMIT_ARTIFACT_NAME in [4-3].
+    - name: "[4-2] Upload results"
+      id: upload_results
       if: always() && steps.validate_inputs.outcome == 'success' && steps.validate_workspace.outcome == 'success'
       uses: actions/upload-artifact@v7
       with:
         name: sbomit-${{ github.job }}-${{ strategy.job-index }}-${{ inputs.sbom-format }}
         path: ${{ runner.temp }}/sbomit/out/
         if-no-files-found: warn
+
+    - name: "[4-3] Write job summary"
+      if: always() && steps.validate_inputs.outcome == 'success' && steps.validate_workspace.outcome == 'success'
+      shell: bash
+      env:
+        SBOMIT_ARTIFACT_NAME: sbomit-${{ github.job }}-${{ strategy.job-index }}-${{ inputs.sbom-format }}
+        SBOMIT_ARTIFACT_URL: ${{ steps.upload_results.outputs.artifact-url }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/report/summary.sh"

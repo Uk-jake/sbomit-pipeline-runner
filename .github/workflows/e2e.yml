@@ -49,15 +49,20 @@ jobs:
           go clean -cache                               # writes to ~/.cache/go-build
           echo "Build outputs and Go caches are writable by the runner user."
 
-      - name: Show action outputs
+      - name: Check action outputs
         env:
           ATTESTATION_PATH: ${{ steps.sbomit.outputs.attestation-path }}
           SBOM_PATH: ${{ steps.sbomit.outputs.sbom-path }}
           METADATA_PATH: ${{ steps.sbomit.outputs.metadata-path }}
         run: |
-          echo "attestation-path: ${ATTESTATION_PATH:-<empty>}"
-          echo "sbom-path       : ${SBOM_PATH:-<empty>}"
-          echo "metadata-path   : ${METADATA_PATH:-<empty>}"
+          set -euo pipefail
+          for p in "$ATTESTATION_PATH" "$SBOM_PATH" "$METADATA_PATH"; do
+            [ -s "$p" ] || { echo "::error::Missing or empty output file: '${p}'"; exit 1; }
+            echo "ok: $p"
+          done
+          status="$(jq -r '.status' "$METADATA_PATH")"
+          [ "$status" = "sbom_generated" ] || { echo "::error::run-metadata status is '${status}'"; exit 1; }
+          jq '{status, inputs, facts: (.facts | {RUNNER_KERNEL, WITNESS_SOURCE, GO_WITNESS_SOURCE, SBOMIT_VERSION, SYFT_VERSION, SBOM_PACKAGES, OWNERSHIP_RESTORED_FILES})}' "$METADATA_PATH"
 
   # Invalid inputs must be rejected by Stage 0. The action step is allowed to fail,
   # and the next step asserts that it actually failed.

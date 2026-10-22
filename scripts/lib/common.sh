@@ -210,8 +210,3 @@ sbom_path() {
     *)     die "Unknown SBOM format: $1" ;;
   esac
 }
-
-# Placeholder used by skeleton scripts that are not implemented yet.
-not_implemented() {
-  log_notice "$1: not implemented yet (skeleton). Skipping."
-}

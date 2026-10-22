@@ -4,10 +4,10 @@ A GitHub Action that runs your build under [witness](https://github.com/in-toto/
 eBPF tracing and generates an SBOM from the resulting signed attestation with
 [sbomit](https://github.com/sbomit/sbomit).
 
-> **Status: in progress.** Stages 0 to 3 are implemented: your build runs under
-> witness eBPF file tracing, a signed attestation is produced, and an SBOM is
-> generated from it. Network trace (`network-trace: true`) is not supported yet.
-> Reporting and upload of all results (Stage 4) are still placeholders.
+> **Status:** the file-trace pipeline is complete: your build runs under witness
+> eBPF file tracing, a signed attestation is produced, an SBOM is generated from
+> it, and all results are uploaded with a summary. Network trace
+> (`network-trace: true`) is not supported yet.
 
 ## How it fits into your workflow
 
@@ -66,6 +66,27 @@ needs for building witness and sbomit is kept separate from your PATH and caches
 The SBOM document is named after your repository, and its version is the short
 commit SHA of the checked-out source, so each SBOM identifies the build it describes.
 
+## What you get
+
+**An artifact** named `sbomit-<job>-<matrix index>-<sbom-format>` containing:
+
+| File | What it is |
+|---|---|
+| `attestation.json` | Signed witness attestation of the build (DSSE envelope) |
+| `sbom.spdx.json` or `sbom.cdx.json` | SBOM generated from the attestation |
+| `signing.pub` | Public key to verify the attestation (the private key is never uploaded) |
+| `witness-run.log` | witness output, for troubleshooting |
+| `run-metadata.json` | Runner, kernel, tool versions and commits, inputs, and how far the run got |
+
+**A summary** on the workflow run page with the SBOM result, what was traced,
+a link to the artifact, and the environment and tool versions.
+
+The artifact and the summary are produced even when the build or SBOM step
+fails, so you can see how far the run got.
+
+> Do not put secrets in `build-command`. The attestation records the command
+> line. Pass secrets to the build through environment variables instead.
+
 ## Accurate SBOMs: turn off dependency caches
 
 witness records what your build actually does. If dependencies are restored from
@@ -93,7 +114,7 @@ added after testing how caches affect the results.
 | 1 Prepare | runner check, tool install | `scripts/prepare/`, `scripts/install/` |
 | 2 Run witness | signing key, network CA (later), traced build, return file ownership | `scripts/witness/` |
 | 3 Run sbomit | generate, check | `scripts/sbomit/` |
-| 4 Report | metadata, summary, upload | `scripts/report/` |
+| 4 Report | metadata, upload, summary | `scripts/report/` |
 
 ## Tools
 

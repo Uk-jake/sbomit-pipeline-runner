@@ -1,36 +1,56 @@
 # SBOMit Pipeline Runner
 
 A GitHub Action that runs your build under [witness](https://github.com/in-toto/witness)
-eBPF tracing and generates an SBOM from the resulting attestation with
+eBPF tracing and generates an SBOM from the resulting signed attestation with
 [sbomit](https://github.com/sbomit/sbomit).
 
-> **Status: in progress.** Stages 0 to 2 are implemented: the build runs under
+> **Status: in progress.** Stages 0 to 2 are implemented: your build runs under
 > witness eBPF file tracing and a signed attestation is produced. Network trace
 > (`network-trace: true`) is not supported yet. SBOM generation (Stage 3) and
 > reporting (Stage 4) are placeholders.
 
-## Usage
+## How it fits into your workflow
+
+This action is used **in place of the build step of your existing build job**.
+Your job keeps doing what it already does: check out the source and prepare the
+build environment (toolchains, environment variables, services). This action then
+runs your build command under witness, and your later steps run as usual.
 
 ```yaml
 jobs:
-  sbom:
-    runs-on: ubuntu-24.04
+  build:
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v7          # required, and must come right before this action
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false                      # recommended, see "Accurate SBOMs" below
       - uses: Uk-jake/sbomit-pipeline-runner@main
         with:
-          build-command: go build -trimpath ./...
-          language: go
+          build-command: make build         # the command your build step runs
+      - run: make test                      # later steps work as usual
 ```
+
+What you provide and what the action does:
+
+| Your job | This action |
+|---|---|
+| Checks out the source (before this action) | Installs witness, sbomit and syft |
+| Sets up toolchains and environment | Runs `build-command` under witness eBPF tracing, with your environment |
+| Runs any steps after the build | Returns files created by the build to the runner user |
+| | Generates the SBOM and uploads the results as an artifact |
+
+The action does not install or change any build toolchain. The Go version it
+needs for building witness and sbomit is kept separate from your PATH and caches.
 
 ## Inputs
 
 | Input | Default | Values |
 |---|---|---|
-| `build-command` | (required) | Command that builds your project. Multi-line allowed. |
-| `language` | `none` | `none`, `go`, `rust`, `node`, `python` |
+| `build-command` | (required) | The command your build step runs. Multi-line allowed. |
 | `network-trace` | `false` | `false` only for now (`true` is rejected until network trace is implemented) |
 | `sbom-format` | `spdx23` | `spdx23`, `cdx14`, `cdx15` |
 | `use-syft` | `true` | `true`, `false` (`cdx15` requires `false`) |
@@ -43,13 +63,34 @@ jobs:
 | `sbom-path` | Generated SBOM |
 | `metadata-path` | Run metadata (environment, tool versions, inputs) |
 
+## Accurate SBOMs: turn off dependency caches
+
+witness records what your build actually does. If dependencies are restored from
+a cache (for example `actions/setup-go` caches by default), the build does not
+download them, so that activity is not observed. For the most accurate SBOM,
+disable dependency caching in the job that uses this action (for example
+`cache: false` on `actions/setup-go`). Detailed guidance per ecosystem will be
+added after testing how caches affect the results.
+
 ## Requirements
 
-- Linux x86_64 runner with passwordless `sudo`
-- A runner where witness eBPF tracing works. If the eBPF tracer cannot be loaded,
-  witness fails before your build starts. There is no ptrace fallback.
-  Supported runners are the ones that pass this repository's E2E workflow.
+- Linux x86_64 runner with passwordless `sudo` (witness needs root for eBPF).
+- A kernel where witness eBPF file tracing works. There is no ptrace fallback.
+  - Tested: `ubuntu-22.04` (kernel 6.8).
+  - Known issue: tracing fails on kernel 7.0 (`command-run eBPF trace missing pending open`),
+    which affects `ubuntu-26.04` and newer `ubuntu-24.04` images. Tracked in go-witness.
+  - Network trace (not yet supported here) will need kernel 6.12 or newer.
 - Network access to github.com, dl.google.com and get.anchore.io (tools are installed at run time).
+
+## What happens inside
+
+| Stage | Step | Script |
+|---|---|---|
+| 0 Validate | inputs, workspace (source checked out) | `scripts/validate/` |
+| 1 Prepare | runner check, tool install | `scripts/prepare/`, `scripts/install/` |
+| 2 Run witness | signing key, network CA (later), traced build, return file ownership | `scripts/witness/` |
+| 3 Run sbomit | generate, check | `scripts/sbomit/` |
+| 4 Report | metadata, summary, upload | `scripts/report/` |
 
 ## Tools
 
@@ -62,26 +103,16 @@ means editing that one file.
 | witness | `witness.sh` | Built from `in-toto/witness` + `in-toto/go-witness` (`main` by default) with `go work` |
 | sbomit | `sbomit.sh` | `go install github.com/sbomit/sbomit@latest` |
 | syft | `syft.sh` | Official installer script from `get.anchore.io` |
-| Go (tools only) | `go.sh` | Official archive, sha256-verified; isolated from the user's PATH and caches |
+| Go (tools only) | `go.sh` | Official archive, sha256-verified; isolated from your PATH and caches |
 
 The exact versions and commits used in a run are recorded for the run metadata.
-
-## Pipeline
-
-| Stage | Step | Script |
-|---|---|---|
-| 0 Validate | inputs, workspace | `scripts/validate/` |
-| 1 Prepare | runner check, tool install, toolchain setup | `scripts/prepare/`, `scripts/install/` |
-| 2 Run witness | signing key, network CA, traced build | `scripts/witness/` |
-| 3 Run sbomit | generate, check | `scripts/sbomit/` |
-| 4 Report | metadata, summary, upload | `scripts/report/` |
 
 ## Running scripts locally
 
 Every script reads `SBOMIT_*` environment variables and can run without GitHub Actions:
 
 ```bash
-SBOMIT_BUILD_COMMAND="go build ./..." SBOMIT_LANGUAGE=go SBOMIT_NETWORK_TRACE=false \
+SBOMIT_BUILD_COMMAND="go build ./..." SBOMIT_NETWORK_TRACE=false \
 SBOMIT_SBOM_FORMAT=spdx23 SBOMIT_USE_SYFT=true \
   bash scripts/validate/inputs.sh
 ```

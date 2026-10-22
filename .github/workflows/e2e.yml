@@ -1,5 +1,13 @@
 # End-to-end tests that run this action from the repository itself (uses: ./).
-# Current scope (skeleton): Stage 0 validation and step wiring.
+#
+# The valid-inputs job mirrors how a user adopts the action: their existing
+# build job checks out the source and sets up the toolchain, then this action
+# replaces the build step, and later steps keep running as usual.
+#
+# Runner: ubuntu-22.04 (kernel 6.8). witness eBPF file trace currently fails on
+# kernel 7.0 (go-witness issue, handled upstream), and Ubuntu 24.04 images are
+# moving to kernel 7.0. Network trace needs kernel 6.12+, so the runner will be
+# revisited when network trace is implemented.
 name: E2E
 
 on:
@@ -11,25 +19,36 @@ permissions:
   contents: read
 
 jobs:
-  # Valid inputs must pass through every stage (stages 1-4 are stubs for now).
   valid-inputs:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-22.04
     steps:
+      # ── User's existing job: checkout + toolchain setup ──
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: Run SBOMit action
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: tests/fixtures/go-hello/go.mod
+          cache: false   # recommended for an accurate SBOM
+
+      # ── This action replaces the user's build step ──
+      - name: Build under SBOMit
         id: sbomit
         uses: ./
         with:
           build-command: |
             cd tests/fixtures/go-hello
-            go build -trimpath ./...
-          language: go
+            go build -trimpath -o bin/go-hello .
+
+      # ── User's later steps must keep working (files are returned to the runner user) ──
+      - name: Later step can use build outputs and caches
+        run: |
+          set -euo pipefail
+          ./tests/fixtures/go-hello/bin/go-hello
+          touch tests/fixtures/go-hello/bin/go-hello   # fails if still root-owned
+          go clean -cache                               # writes to ~/.cache/go-build
+          echo "Build outputs and Go caches are writable by the runner user."
+
       - name: Show action outputs
         env:
           ATTESTATION_PATH: ${{ steps.sbomit.outputs.attestation-path }}
@@ -43,45 +62,34 @@ jobs:
   # Invalid inputs must be rejected by Stage 0. The action step is allowed to fail,
   # and the next step asserts that it actually failed.
   invalid-inputs:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
         include:
           - case: empty-build-command
             build_command: "   "
-            language: none
-            network_trace: "false"
-            sbom_format: spdx23
-            use_syft: "true"
-          - case: unknown-language
-            build_command: "true"
-            language: java
             network_trace: "false"
             sbom_format: spdx23
             use_syft: "true"
           - case: unknown-sbom-format
             build_command: "true"
-            language: none
             network_trace: "false"
             sbom_format: spdx22
             use_syft: "true"
           - case: non-bool-network-trace
             build_command: "true"
-            language: none
             network_trace: "yes"
             sbom_format: spdx23
             use_syft: "true"
           # Temporary: network trace is not implemented yet. Remove when it is.
           - case: network-trace-not-supported-yet
             build_command: "true"
-            language: none
             network_trace: "true"
             sbom_format: spdx23
             use_syft: "true"
           - case: cdx15-with-syft
             build_command: "true"
-            language: none
             network_trace: "false"
             sbom_format: cdx15
             use_syft: "true"
@@ -96,7 +104,6 @@ jobs:
         uses: ./
         with:
           build-command: ${{ matrix.build_command }}
-          language: ${{ matrix.language }}
           network-trace: ${{ matrix.network_trace }}
           sbom-format: ${{ matrix.sbom_format }}
           use-syft: ${{ matrix.use_syft }}

@@ -33,6 +33,10 @@ LOG="$SBOMIT_WORK_DIR/witness-run.log"
 cd "$SBOMIT_WORKSPACE"
 mkdir -p "$SBOMIT_OUT_DIR"
 
+# Timestamp marker: files created/modified by the root-run build are newer than this.
+MARKER="$SBOMIT_WORK_DIR/build-start.marker"
+touch "$MARKER"
+
 # ── Run ──────────────────────────────────────────────────────────────────────
 # Root is required for eBPF. HOME and PATH are kept so the build sees the same
 # toolchains and caches as the runner user (sudo would otherwise reset them).
@@ -54,9 +58,21 @@ set -e
 group_end
 # ─────────────────────────────────────────────────────────────────────────────
 
-# witness ran as root; hand results back to the runner user.
-sudo chown "$(id -u):$(id -g)" "$ATTESTATION" "$LOG" 2>/dev/null || true
+# ---- Return files to the runner user ----------------------------------------
+# The build ran as root, so build outputs (workspace) and caches ($HOME, e.g.
+# ~/go, ~/.cache) it created are root-owned. Later steps in the caller's job run
+# as the runner user and would fail with "permission denied" on them.
+# Only files that are root-owned AND created/changed after the marker (ctime,
+# which tools cannot backdate the way they can mtime) are changed, so
+# anything root-owned before this action is left as it was. Runs on success
+# and failure alike.
+owner="$(id -u):$(id -g)"
+sudo find "$SBOMIT_WORKSPACE" "$HOME" "$SBOMIT_WORK_DIR" -xdev -user root -cnewer "$MARKER" \
+  -exec chown -h "$owner" {} + 2>/dev/null || true
 record_fact WITNESS_EXIT_CODE "$rc"
+
+# Keep the witness log with the uploaded results (success or failure) for diagnosis.
+cp "$LOG" "$SBOMIT_OUT_DIR/witness-run.log" 2>/dev/null || true
 
 # ---- Failure: explain the most likely cause --------------------------------
 if [ "$rc" -ne 0 ]; then
@@ -68,6 +84,11 @@ if [ "$rc" -ne 0 ]; then
   if ! grep -q "Using tracer: ebpf" "$LOG" && grep -qiE 'ebpf|bpf|cgroup' "$LOG"; then
     # TODO: refine this message once the supported runner image is confirmed by E2E.
     die "witness could not use eBPF tracing on this runner (kernel $(uname -r)). SBOMit requires eBPF; ptrace is not supported. See the witness log above."
+  fi
+  # The tracer loaded but reported an internal error while reading events.
+  # go-witness then kills the build on purpose (an incomplete trace must not be signed).
+  if grep -q "command-run eBPF trace error" "$LOG"; then
+    die "witness eBPF tracer reported an internal tracing error (see 'command-run eBPF trace error' above). This is a witness/go-witness issue, not a build failure. Known to happen on kernel 7.0 (this runner: $(uname -r))."
   fi
   die "witness run failed (exit code ${rc}). This is usually the build command itself failing; see the log above."
 fi

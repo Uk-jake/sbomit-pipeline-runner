@@ -9,16 +9,16 @@ author: Uk-jake
 #   caller's workspace.
 # - Inputs are passed to scripts as SBOMIT_* env vars on the steps that need them.
 #   They are never interpolated into `run:` bodies (prevents script injection).
-# - The caller must run actions/checkout before this action.
+# - This action replaces the build step of the caller's existing build job.
+#   The caller checks out the source and prepares the build environment
+#   (toolchains, env vars, services) in earlier steps; this action does not
+#   install or change any build toolchain. It only adds witness/sbomit/syft
+#   (tools Go is isolated from the caller's PATH and caches).
 
 inputs:
   build-command:
-    description: "Required. Command that builds your project. witness traces it. Multi-line allowed."
+    description: "Required. The command your build step runs (e.g. make build). witness traces it. Multi-line allowed."
     required: true
-  language:
-    description: "Project toolchain to set up before the build: none | go | rust | node | python. 'none' means you set it up yourself."
-    required: false
-    default: "none"
   network-trace:
     description: "Also trace network activity during the build: true | false."
     required: false
@@ -52,7 +52,6 @@ runs:
       shell: bash
       env:
         SBOMIT_BUILD_COMMAND: ${{ inputs.build-command }}
-        SBOMIT_LANGUAGE: ${{ inputs.language }}
         SBOMIT_NETWORK_TRACE: ${{ inputs.network-trace }}
         SBOMIT_SBOM_FORMAT: ${{ inputs.sbom-format }}
         SBOMIT_USE_SYFT: ${{ inputs.use-syft }}
@@ -88,37 +87,7 @@ runs:
     # No separate eBPF check step: witness itself fails before the build starts
     # when the eBPF tracer cannot be loaded (no silent ptrace fallback), and
     # Stage 2-3 verifies that the ebpf tracer was actually used.
-    #
-    # [1-3] Project toolchain. Runs after tool installation so the user's
-    # toolchain ends up first on PATH. Caching is disabled on purpose:
-    # a warm dependency cache changes what witness observes (cold-cache policy).
-    - name: "[1-3] Set up Go"
-      if: inputs.language == 'go'
-      uses: actions/setup-go@v7
-      with:
-        go-version-file: ${{ hashFiles('go.mod') != '' && 'go.mod' || '' }}
-        go-version: ${{ hashFiles('go.mod') == '' && 'stable' || '' }}
-        cache: false
 
-    - name: "[1-3] Set up Rust"
-      if: inputs.language == 'rust'
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: "[1-3] Set up Node"
-      if: inputs.language == 'node'
-      uses: actions/setup-node@v7
-      with:
-        node-version-file: ${{ hashFiles('.nvmrc') != '' && '.nvmrc' || '' }}
-        node-version: ${{ hashFiles('.nvmrc') == '' && 'lts/*' || '' }}
-        # setup-node v5+ auto-enables caching when package.json has "packageManager".
-        package-manager-cache: false
-
-    - name: "[1-3] Set up Python"
-      if: inputs.language == 'python'
-      uses: actions/setup-python@v7
-      with:
-        python-version-file: ${{ hashFiles('.python-version') != '' && '.python-version' || '' }}
-        python-version: ${{ hashFiles('.python-version') == '' && '3.x' || '' }}
 
     # ── Stage 2. Run witness ───────────────────────────────────────────────
     - name: "[2-1] Generate signing key"
@@ -161,7 +130,6 @@ runs:
       if: always() && steps.validate_inputs.outcome == 'success' && steps.validate_workspace.outcome == 'success'
       shell: bash
       env:
-        SBOMIT_LANGUAGE: ${{ inputs.language }}
         SBOMIT_NETWORK_TRACE: ${{ inputs.network-trace }}
         SBOMIT_SBOM_FORMAT: ${{ inputs.sbom-format }}
         SBOMIT_USE_SYFT: ${{ inputs.use-syft }}

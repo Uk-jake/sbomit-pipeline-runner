@@ -39,6 +39,8 @@ sudo install -m 0755 ./bin/witness /usr/local/bin/witness
 group_end
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Record exactly what was built (branch names move, commit SHAs do not).
+# Show and record exactly what was built (branch names move, commit SHAs do not).
+log_info "witness    : ${WITNESS_REPO} ${WITNESS_REF} -> $(git -C "$SBOMIT_TOOLS_DIR/witness" rev-parse HEAD)"
+log_info "go-witness : ${GO_WITNESS_REPO} ${GO_WITNESS_REF} -> $(git -C "$SBOMIT_TOOLS_DIR/go-witness" rev-parse HEAD)"
 record_fact WITNESS_SOURCE "${WITNESS_REPO} ${WITNESS_REF} $(git -C "$SBOMIT_TOOLS_DIR/witness" rev-parse HEAD)"
 record_fact GO_WITNESS_SOURCE "${GO_WITNESS_REPO} ${GO_WITNESS_REF} $(git -C "$SBOMIT_TOOLS_DIR/go-witness" rev-parse HEAD)"

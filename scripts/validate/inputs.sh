@@ -3,7 +3,6 @@
 #
 # Env (set by action.yml from inputs):
 #   SBOMIT_BUILD_COMMAND   required, non-blank (multi-line allowed)
-#   SBOMIT_LANGUAGE        none | go | rust | node | python
 #   SBOMIT_NETWORK_TRACE   true | false
 #   SBOMIT_SBOM_FORMAT     spdx23 | cdx14 | cdx15
 #   SBOMIT_USE_SYFT        true | false
@@ -14,11 +13,9 @@ set -euo pipefail
 # shellcheck source=scripts/lib/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
-ALLOWED_LANGUAGES=(none go rust node python)
 ALLOWED_SBOM_FORMATS=(spdx23 cdx14 cdx15)
 
 build_command="${SBOMIT_BUILD_COMMAND:-}"
-language="${SBOMIT_LANGUAGE:-}"
 network_trace="${SBOMIT_NETWORK_TRACE:-}"
 sbom_format="${SBOMIT_SBOM_FORMAT:-}"
 use_syft="${SBOMIT_USE_SYFT:-}"
@@ -28,11 +25,6 @@ errors=()
 # build-command: must contain at least one non-whitespace character.
 if [ -z "${build_command//[[:space:]]/}" ]; then
   errors+=("'build-command' is required. Example: build-command: go build -trimpath ./...")
-fi
-
-# language
-if ! is_one_of "$language" "${ALLOWED_LANGUAGES[@]}"; then
-  errors+=("'language' must be one of: ${ALLOWED_LANGUAGES[*]} (got: '${language}')")
 fi
 
 # network-trace
@@ -71,7 +63,6 @@ if [ "${#errors[@]}" -gt 0 ]; then
 fi
 
 group_start "Validated inputs"
-log_info "language      : ${language}"
 log_info "network-trace : ${network_trace}"
 log_info "sbom-format   : ${sbom_format}"
 log_info "use-syft      : ${use_syft}"

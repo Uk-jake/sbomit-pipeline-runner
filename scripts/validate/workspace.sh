@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Stage 0-2: confirm the user's source has been checked out into the workspace.
 #
-# This action does not check out code itself. The user must run actions/checkout
-# immediately before this action. Without it, $GITHUB_WORKSPACE is empty.
+# This action does not check out code itself. The caller's job must run
+# actions/checkout before this action (setup steps in between are fine).
+# Without it, $GITHUB_WORKSPACE is empty.
 #
 # Env:
 #   GITHUB_WORKSPACE   set by GitHub Actions (falls back to $PWD for local runs)
@@ -12,7 +13,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/common.sh"
 
 ws="$SBOMIT_WORKSPACE"
-checkout_hint="Add 'uses: actions/checkout@v7' as the step right before this action."
+checkout_hint="Add 'uses: actions/checkout@v7' to your job before this action."
 
 if [ ! -d "$ws" ]; then
   die "Workspace directory does not exist: ${ws}. ${checkout_hint}"
@@ -30,14 +31,12 @@ fi
 
 commit="$(git -C "$ws" rev-parse HEAD 2>/dev/null || echo unknown)"
 
-# Warn (not fail) when files were changed before this action ran.
-# Anything prepared before witness starts is outside the traced build.
+# Report (do not warn) files changed by earlier steps. Earlier setup steps are
+# expected, but anything they produced is outside the traced build.
 dirty="$(git -C "$ws" status --porcelain 2>/dev/null || true)"
 if [ -n "$dirty" ]; then
-  log_warn "Workspace has changes before the traced build started. Work done before this action is not observed by witness. Place this action right after actions/checkout."
-  group_start "Uncommitted changes in workspace"
-  printf '%s\n' "$dirty" | head -50
-  group_end
+  log_info "Workspace was modified by earlier steps (not observed by witness):"
+  printf '%s\n' "$dirty" | head -50 | sed 's/^/    /'
 fi
 
 log_info "Workspace : ${ws}"

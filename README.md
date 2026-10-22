@@ -1,8 +1,7 @@
 # SBOMit Pipeline Runner
 
-A GitHub Action that runs your build under [witness](https://github.com/in-toto/witness)
-eBPF tracing and generates an SBOM from the resulting signed attestation with
-[sbomit](https://github.com/sbomit/sbomit).
+A GitHub Action that generate a SBOM file using [sbomit](https://github.com/sbomit/sbomit).
+the action runs your build under [witness](https://github.com/in-toto/witness) and generates an SBOM.
 
 > **Status:** the file-trace pipeline is complete: your build runs under witness
 > eBPF file tracing, a signed attestation is produced, an SBOM is generated from
@@ -110,11 +109,11 @@ added after testing how caches affect the results.
 
 | Stage | Step | Script |
 |---|---|---|
-| 0 Validate | inputs, workspace (source checked out) | `scripts/validate/` |
-| 1 Prepare | runner check, tool install | `scripts/prepare/`, `scripts/install/` |
-| 2 Run witness | signing key, network CA (later), traced build, return file ownership | `scripts/witness/` |
-| 3 Run sbomit | generate, check | `scripts/sbomit/` |
-| 4 Report | metadata, upload, summary | `scripts/report/` |
+| Validate | inputs, workspace (source checked out) | `scripts/validate/` |
+| Prepare | runner check, tool install | `scripts/prepare/`, `scripts/install/` |
+| Run witness | signing key, network CA (later), traced build, return file ownership | `scripts/witness/` |
+| Run sbomit | generate, check | `scripts/sbomit/` |
+| Report | metadata, upload, summary | `scripts/report/` |
 
 ## Tools
 
